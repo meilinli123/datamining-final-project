@@ -1,0 +1,536 @@
+---
+title: "Comparative Analysis of Machine Learning Models for Predicting Bacteremia"
+output: pdf_document
+author: "Yueting Zhang, Melin Li"
+date: "2024-04-29"
+
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = FALSE, message = FALSE, warning = FALSE,
+                      out.width = "50%", out.height = "50%", fig.align='center')
+```
+
+# Abstract
+\flushleft
+This project aims to predict the blood culture result for patients who are suspected to have bloodstream infection due to Bateremia, using machine learning classification methods. We tested four major models to see their performance on a real hospital record of blood test statistics and blood culture results. The four models are: logistic regression, Lasso, Random Forest and Boosting. Various methods are applied to these models to improve their capability of classifying minority groups in the imbalanced dataset. Among the four models, we discovered that logistic regression and Lasso performed the best, while Random Forest and Boosting have their imperfection. 
+
+
+# Introduction
+\flushleft
+Bacteremia is a clinical situation under which there’s presence of bacteria in blood. It can be either dangerous or mild, depending on whether the person’s immune system successfully responds and eliminates the bacteria. If the immune system works perfectly, bacteremia will be self-cured, and no medical treatment is needed. However, if the immune system fails to react, bacteremia may develop into acute and deadly consequences such as sepsis, systemic inflammatory response syndrome (SIRS), and multiple organ dysfunction syndrome (MODS). Once the bloodstream infection occurs, the patient can have symptoms like fever, chills and shaking, which will be suspected of having the infection and blood culture will be required for diagnosis. Deadly consequences can happen in a very short period of time so prompt antibiotic treatment is required. For precise antibiotics prescription to be given, the exact type of bacteria needs to be identified. However, blood culture can take as short as 2 days, or can also be over 7 days for organisms that are hard to culture in laboratory environment. Although very likely to be cured once treated correctly, the mortality of bacteremia in emergency department (ED) can be as high as 37% due to untimely treatment.  
+
+\flushleft
+Such high-risk disease is paid high attention in clinical scenarios. The doctors usually decide to proceed with blood culture for most of the patients with suspected symptoms.  However, the result of blood culture usually have a low positive rate, and even a high false positive rate due to contamination or other incidents in lab environment. Thus, suspected bloodstream infection can lead to high hospitalization rate, economic burden, and workload for hospital faculty. 
+
+\flushleft
+We want to figure out a machine learning method which fastens the diagnosis process and save resources. However, disease detection has long been a discussed topic in machine learning which is known for imbalanced data set and difficulty in training. In this report, several models were tested using patients' blood test data from Vienna General Hospital, Austria. In the data set, the blood culture results has only a 10% positive rate. To deal with the imbalanced and high dimensional data set, resampling, class weight adjustment, and principle component analysis (PCA) were tested. During our investigation, we paid extra attention to true positive rate (TPR) and true negative rate (TNR) due to the specific setting. Among all of the models we tested, Lasso and Random Forest are proven to be especially effective with over 50% true positive rate. 
+
+\flushleft
+In this report, we are going to discuss about details of our data set, methods we use, and visualization of our results. Our investigation provides new insights about model selection for disease detection, and also some practical solutions to classification models when imbalanced outcome variables are present. 
+
+\flushleft
+# Data and Methods
+\flushleft
+
+## Codebook
+\flushleft
+The original data comes from the Vienna General Hospital, Austria Between January 2006 and December 2010. After excluding the ommiting values, it includes 3979 obs. of  52 variables. **BloodCulture** is variable we are expected to predict. However, we find it unbalanced:
+
+```{r packages, include=FALSE, echo=FALSE}
+library(tidyverse)
+library(ggplot2)
+library(modelr)
+library(rsample)
+library(mosaic)
+library(gamlr)
+library(glmnet)
+library(foreach)
+library(caret)
+library(nnet)
+library(dplyr)
+library(pROC)
+library(performanceEstimation)
+library(randomForest)
+library(gbm)
+
+```
+
+```{r load_data, message=FALSE, warning=FALSE}
+
+data = read.csv("~/Desktop/datamining-final-project/data/Bacteremia_public_S2.csv")
+data$SEX <- ifelse(data$SEX == "1", 0, 1) 
+data$BloodCulture <- ifelse(data$BloodCulture == "yes", 1, ifelse(data$BloodCulture == "no", 0, NA))
+
+data <- data[, !names(data) %in% "ID"]
+data = na.omit(data)
+
+set.seed(1)
+data_split =  initial_split(data, prop=0.8)
+bact_train = training(data_split)
+bact_test = testing(data_split)
+
+count_yes <- sum(data$BloodCulture == 1)
+print(paste("Number of positive blood culture tests:", count_yes))
+
+count_no <- sum(data$BloodCulture == 0)
+print(paste("Number of negative blood culture tests:", count_no))
+
+
+```
+
+\flushleft
+The details of each variable present in the following table.
+
+\centering
+Table 1: Variable Descriptions
+
+
+| Variable | Label                                        | Units | Variable | Label                                        | Units    |
+|:--------:|:------------------------------|:------|:-------------:|:---------------------------------------------|:---------|
+| SEX      | Patient sex (male=0; female=1)                                 | binary| MCV      | Mean corpuscular volume                      | pg       |
+| AGE      | Patient Age                                  | years | HGB      | Haemoglobin                                  | G/L      |
+| PLT      | Blood platelets                              | G/L   | HCT      | Haematocrit                                  | %        |
+| MCH      | Mean corpuscular hemoglobin                  | fl    | MCHC     | Mean corpuscular hemoglobin concentration    | g/dl     |
+| RDW      | Red blood cell distribution width            | %     | MPV      | Mean platelet volume                         | fl       |
+| LYM      | Lymphocytes                                  | G/L   | MONO     | Monocytes                                    | G/L      |
+| EOS      | Eosinophils                                  | G/L   | BASO     | Basophiles                                   | G/L      |
+| NT       | Normotest                                    | %     | APTT     | Activated partial thromboplastin time       | sec      |
+| FIB      | Fibrinogen                                   | mg/dl | SODIUM   | Sodium                                       | mmol/L   |
+| POTASS   | Potassium                                    | mmol/L| CA       | Calcium                                      | mmol/L   |
+| PHOS     | Phosphate                                    | mmol/L| MG       | Magnesium                                    | mmol/L   |
+| CREA     | Creatinine                                   | mg/dl | BUN      | Blood urea nitrogen                          | mg/dl    |
+| HS       | Uric acid                                    | mg/dl | GBIL     | Bilirubin                                    | mg/dl    |
+| TP       | Total protein                                | G/L   | ALB      | Albumin                                      | G/L      |
+| AMY      | Amylase                                      | U/L   | PAMY     | Pancreas amylase                             | U/L      |
+| LIP      | Lipases                                      | U/L   | CHE      | Cholinesterase                               | kU/L     |
+| AP       | Alkaline phosphatase                         | U/L   | ASAT     | Aspartate transaminase                       | U/L      |
+| ALAT     | Alanin transaminase                          | U/L   | GGT      | Gamma-glutamyl transpeptidase                | G/L      |
+| LDH      | Lactate dehydrogenase                        | U/L   | CK       | Creatinine kinases                           | U/L      |
+| GLU      | Glucoses                                     | mg/dl | TRIG     | Triclyceride                                 | mg/dl    |
+| CHOL     | Cholesterol                                  | mg/dl | CRP      | C-reactive protein                           | mg/dl    |
+| BASOR    | Basophile ratio                              | %     | EOSR     | Eosinophil ratio                             | %        |
+| LYMR     | Lymphocyte ratio                             | % (mg/dl)| MONOR  | Monocyte ratio                               | %        |
+| NEU      | Neutrophiles                                 | G/L   | NEUR     | Neutrophile ratio                            | %        |
+| PDW      | Platelet distribution width                  | %     | RBC      | Red blood count                              | T/L      |
+| WBC      | White blood count                            | G/L   | BloodCulture | Blood culture result for bacteremia        | no, yes  |
+
+\flushleft
+## Classification 
+### Lasso
+
+```{r lasso, include=FALSE, echo=FALSE}
+
+# lasso model
+
+bact_x <- scale(model.matrix(BloodCulture ~
+                               AGE+PLT+MONO+SODIUM+MG+BUN+HS+GBIL+AP+GGT+LDH+CRP+EOSR+MONOR+NEUR+AGE*MG+AGE*EOSR+AGE*MONOR -1, data = bact_train))  
+bact_y = bact_train$BloodCulture
+
+bact_lasso = cv.glmnet(bact_x, bact_y, family = "binomial", weights = ifelse(bact_y == 1, 10, 1))
+
+coefLasso = coef(bact_lasso) %>% 
+  as.matrix() %>% 
+  as.data.frame() 
+
+bact_test_x <- scale(model.matrix(BloodCulture ~ AGE + PLT + MONO + SODIUM + MG + BUN + HS + GBIL + AP + GGT
+                                  +LDH + CRP + EOSR + MONOR +
+                                    NEUR+AGE*MG+AGE*EOSR+AGE*MONOR -1, data =
+                                    bact_test))
+
+phat_test <- predict(bact_lasso, newx = bact_test_x, s = "lambda.min", type = "response")
+yhat_test <- ifelse(phat_test > 0.5, 1, 0)
+
+bact_test$BloodCulture <- as.factor(bact_test$BloodCulture)
+
+# lasso performance 
+
+# The Caret package has a different definition of sensitivity. The TPR we use is TP/(TP+FN), which is noted as "specificity" in R.
+confMatrix1 <- confusionMatrix(as.factor(yhat_test), bact_test$BloodCulture)
+print(confMatrix1)
+cat("Accuracy:", confMatrix1$overall['Accuracy'], "\n")
+cat("TPR:", confMatrix1$byClass['Specificity'], "\n")
+
+roc <- roc(bact_test$BloodCulture, phat_test)
+
+auc_value <- auc(roc)
+print(paste("AUC:", auc_value))
+
+ci <- ci.auc(roc)
+print(paste("AUC 95% CI:", ci[1], "-", ci[3]))
+
+plot(roc, main="ROC Curve", col="#1c61b6", lwd=2)
+abline(a=0, b=1, lty=2, col="gray")
+text(0.8, 0.2, paste("AUC =", round(auc_value, 2)), border="black", cex=1.2, font=2)
+
+
+```
+ \flushleft
+We first consider the Lasso regression model to predict and analyze the BloodCulture response variable in the training data and validate the model's performance on testing data.  Lasso regression increases the sparsity of the model by imposing an absolute value penalty on the coefficients, causing the coefficients of less important variables to tend toward zero, thus achieving automatic selection of variables and reducing complexity. 
+
+\flushleft
+A model matrix is first created and then standardized. Subsequently, a binary classification Lasso model is fitted using the cv.glmnet function with cross-validation.
+
+\flushleft
+Additionally, to address potential class imbalance issues, the weights parameter is used to assign weights to the classification outcomes, giving higher weights to the minority class (BloodCulture == yes). This is because in medical and other fields, the identification of minority classes is often more important and more challenging. Increasing their weight helps the model pay more attention to these categories, potentially improving the model's prediction accuracy for minority classes.
+
+\flushleft
+Next, the fitted Lasso model is used to make predictions on the test dataset, and the probabilities generated are used to determine the classification of each sample (threshold set at 0.5).
+
+### Logistic regression
+
+```{r Logistic, include=FALSE, echo=FALSE}
+
+ # Logistic model
+
+bact_lm <- glm(BloodCulture ~ ., family=binomial,
+               data=bact_train, weights = ifelse(bact_train$BloodCulture == 1, 10, 1))
+
+phat_test <- predict(bact_lm, newdata = bact_test, type = "response")
+yhat_test <- ifelse(phat_test > 0.5, 1, 0)
+
+bact_test$BloodCulture <- as.factor(bact_test$BloodCulture)
+
+ # Logistic performance
+
+confusionMatrix2 <- confusionMatrix(as.factor(yhat_test), bact_test$BloodCulture)
+confusionMatrix2
+cat("Accuracy:", confusionMatrix2$overall['Accuracy'], "\n")
+cat("TPR:", confusionMatrix2$byClass['Specificity'], "\n")
+
+roc <- roc(bact_test$BloodCulture, phat_test)
+
+auc_value <- auc(roc)
+print(paste("AUC:", auc_value))
+
+ci <- ci.auc(roc)
+print(paste("AUC 95% CI:", ci[1], "-", ci[3]))
+
+plot(roc, main="ROC Curve", col="#1c61b6", lwd=2)
+abline(a=0, b=1, lty=2, col="gray")
+text(0.8, 0.2, paste("AUC =", round(auc_value, 2)), border="black", cex=1.2, font=2)
+
+
+```
+
+
+\flushleft
+Secondly, we adopted a logistic regression model for prediction. We set the parameters and introduced weights similar to what we do in the LASSO model. 
+
+### Random forest
+
+```{r RF, include=FALSE, echo=FALSE}
+
+ # Random Forest model
+
+bact_train$BloodCulture <- as.factor(bact_train$BloodCulture)
+
+bact_train_balanced <- smote(BloodCulture ~ AGE+PLT+MONO+SODIUM+MG+BUN+HS+GBIL+AP+GGT+LDH+CRP+EOSR+MONOR+NEUR+AGE*MG+AGE*EOSR+AGE*MONOR -1, bact_train, perc.over = 300, k = 10)
+
+bact_rf = randomForest(BloodCulture ~ AGE+PLT+MONO+SODIUM+MG+BUN+HS+GBIL+AP+GGT+LDH+CRP+EOSR+MONOR+NEUR+AGE*MG+AGE*EOSR+AGE*MONOR -1, data = bact_train_balanced, ntree = 500, importance = TRUE)
+
+predictions <- predict(bact_rf, bact_test, type = "prob")[,2]  
+predictions_factor <- factor(ifelse(predictions > 0.5, "1", "0"), levels = c("0", "1"))
+print(length(predictions_factor))
+print(length(bact_test$BloodCulture))
+
+bact_test$BloodCulture <- factor(bact_test$BloodCulture, levels = c("0", "1"))
+
+ # Random Forest Perfermance
+
+conf_matrix3 <- confusionMatrix(predictions_factor, bact_test$BloodCulture)
+print(conf_matrix3)
+cat("Accuracy:", conf_matrix3$overall['Accuracy'], "\n")
+cat("TPR:", conf_matrix3$byClass['Specificity'], "\n")  
+roc_curve <- roc(response = bact_test$BloodCulture, predictor = predictions)
+auc_value <- auc(roc_curve)
+ci <- ci.auc(roc_curve)
+
+print(paste("AUC:", auc_value))
+print(paste("AUC 95% CI:", ci[1], "-", ci[3]))
+
+plot(roc_curve, main="ROC Curve", col="#1c61b6", lwd=2)
+abline(a = 0, b = 1, lty = 2, col = "gray")
+text(0.8, 0.2, paste("AUC =", round(auc_value, 2)), border = "black", cex = 1.2, font = 2)
+
+
+```
+
+\flushleft
+Next, we use the Random Forest algorithm to classify and predict bacteremia data. Random Forest builds on bagging by creating B bootstrapped samples from the original data and constructing a tree for each. It introduces additional randomness by selecting a subset of features for building each tree, rather than using all features. This approach simplifies each tree, reduces variance, and diversifies the ensemble of trees, decreasing the correlation between their predictions.
+
+\flushleft
+We employ the SMOTE (Synthetic Minority Over-sampling Technique) to oversample the training data, enhancing the number of minority class samples with parameters perc.over = 300 and k = 10. This helps address class imbalance issues, where perc.over = 300 increases the minority class samples to 300% of their original number, and k = 10 refers to the number of nearest neighbors considered while generating synthetic samples.
+
+\flushleft
+In configuring the Random Forest model, we specifically set up 500 trees, which we find that it give the best performance. We use Lasso regression to select features before inputting them into the Random Forest to reduce the complexity of the model and improves the accuracy of predictions. By this method, the Random Forest model can focus on the most predictive variables, thereby optimizing the overall performance of the model.
+
+
+### Boosting
+
+```{r Boosting, include=FALSE, echo=FALSE}
+
+ # Boosting
+
+bact_boost = gbm(BloodCulture ~ ., 
+                 data = bact_train,
+                 distribution = 'multinomial',  
+                 interaction.depth = 4, 
+                 n.trees = 1000, 
+                 shrinkage = .05, weights = ifelse(bact_train$BloodCulture == 1, 10, 1))
+
+predictions <- predict(bact_boost, newdata = bact_test, n.trees = 1000, type = "response")
+predicted_classes <- apply(predictions, 1, which.max)  
+predicted_classes <- factor(predicted_classes, levels = 1:nlevels(bact_test$BloodCulture), labels = levels(bact_test$BloodCulture))
+
+bact_test$BloodCulture <- factor(bact_test$BloodCulture)
+
+ # Boosting Perfermance
+
+confMatrix6 <- confusionMatrix(predicted_classes, bact_test$BloodCulture)
+print(confMatrix6)
+cat("Accuracy:", confMatrix6$overall['Accuracy'], "\n")
+cat("TPR:", confMatrix6$byClass['Specificity'], "\n")  
+
+```
+
+\flushleft
+We implement a boosting algorithm using the gbm function with a multinomial distribution to predict **BloodCulture** outcomes from the taining data. The model is configured with 1000 trees, an interaction depth of 4, a learning rate (shrinkage) of 0.05, and weighted instances to address class imbalance.  Despite these efforts, the resulting analysis indicates that the boosting model's performance is not satisfactory.
+
+# Classification with PCA
+
+\flushleft
+Given that the data contains 51 numerical features, we would apply a principal component analysis (**PCA**) method called for dimension reduction. PCA, by extracting the main sources of variation, helps to uncover the hidden and most informative structures within the data. 
+
+```{r PCA, include=FALSE}
+
+ # PCA
+
+bact_train_scaled <- scale(bact_train[, -which(names(bact_train) == "BloodCulture")])  
+bact_test_scaled <- scale(bact_test[, -which(names(bact_test) == "BloodCulture")], center = attr(bact_train_scaled, "scaled:center"), scale = attr(bact_train_scaled, "scaled:scale"))
+
+ggcorrplot::ggcorrplot(cor(bact_train_scaled), hc.order = TRUE)
+
+pca_model <- prcomp(bact_train_scaled, center = TRUE, scale. = TRUE)
+
+summary(pca_model)
+
+bact_test_pca <- predict(pca_model, newdata = bact_test_scaled)
+
+bact_train_pca <- predict(pca_model, newdata = bact_train_scaled)
+
+var_explained <- cumsum(pca_model$sdev^2 / sum(pca_model$sdev^2))
+num_components <- max(which(var_explained <= 0.9))
+bact_train_pca <- bact_train_pca[, 1:num_components]
+bact_test_pca <- bact_test_pca[, 1:num_components]
+
+```
+
+\flushleft
+The confusion matrix illustrates the relative low corrlation between features. As observed, 51 principal components (PCs) were generated, with the first two PCs explaining only 19.6% of the variance, which might indicate insufficient explanatory power.  However, to enhance our model's effectiveness when applying above models , we opt to use the first 15 principal components that cumulatively explain over 70% of the variance. In all the PCA training dataset we also address class imbalance by over-sampling the minority class. And predictions are made on the PCA-reduced test dataset.
+
+\flushleft
+We will see if integrating **PCA** into the classificaiton process before running **Logistic**,  **Lasso**, **Random Forest**, and **Boosting** model can improves prediction performance. Performance results and discussion will be illustrated in next section.
+
+
+```{r PCA_Logistic, include=FALSE, echo=FALSE}
+
+# Logistic Model with PCA
+
+bact_train_pca_15 <- bact_train_pca[, 1:15]
+bact_test_pca_15 <- bact_test_pca[, 1:15]
+
+bact_train_pca_15_df <- data.frame(bact_train_pca_15, BloodCulture = bact_train$BloodCulture)
+bact_test_pca_15_df <- data.frame(bact_test_pca_15, BloodCulture = bact_test$BloodCulture)
+
+bact_lm <- glm(BloodCulture ~ ., family=binomial,
+               data=bact_train_pca_15_df, weights = ifelse(bact_train_pca_15_df$BloodCulture == 1, 10, 1))
+
+phat_test <- predict(bact_lm, newdata = bact_test_pca_15_df, type = "response")
+yhat_test <- ifelse(phat_test > 0.5, 1, 0)
+
+bact_test_pca_15_df$BloodCulture <- as.factor(bact_test_pca_15_df$BloodCulture)
+
+confusionMatrix <- confusionMatrix(as.factor(yhat_test), bact_test_pca_15_df$BloodCulture)
+confusionMatrix
+cat("Accuracy:", confusionMatrix$overall['Accuracy'], "\n")
+cat("TPR:", confusionMatrix$byClass['Specificity'], "\n")
+
+roc <- roc(bact_test_pca_15_df$BloodCulture, phat_test)
+
+auc_value <- auc(roc)
+print(paste("AUC:", auc_value))
+
+ci <- ci.auc(roc)
+print(paste("AUC 95% CI:", ci[1], "-", ci[3]))
+
+plot(roc, main="ROC Curve", col="#1c61b6", lwd=2)
+abline(a=0, b=1, lty=2, col="gray")
+text(0.8, 0.2, paste("AUC =", round(auc_value, 2)), border="black", cex=1.2, font=2)
+
+```
+
+
+```{r PCA_Lasso, include=FALSE, echo=FALSE}
+
+ # Lasso model with PCA
+
+bact_train_pca_15 <- bact_train_pca[, 1:15]
+bact_test_pca_15 <- bact_test_pca[, 1:15]
+
+bact_x_pca_15 <- as.matrix(bact_train_pca_15)
+bact_y <- bact_train$BloodCulture 
+
+bact_lasso_pca <- cv.glmnet(bact_x_pca_15, bact_y, family = "binomial", weights = ifelse(bact_y == 1, 10, 1))
+
+
+coef_pca_15 <- coef(bact_lasso_pca, s = "lambda.min") %>%
+  as.matrix() %>%
+  as.data.frame()
+
+bact_test_x_pca_15 <- as.matrix(bact_test_pca_15)
+
+phat_test <- predict(bact_lasso, newx = bact_test_x, s = "lambda.min", type = "response")
+yhat_test <- ifelse(phat_test > 0.5, 1, 0)
+
+bact_test$BloodCulture <- as.factor(bact_test$BloodCulture)
+
+confMatrix4 <- confusionMatrix(as.factor(yhat_test), bact_test$BloodCulture)
+print(confMatrix4)
+cat("Accuracy:", confMatrix4$overall['Accuracy'], "\n")
+cat("TPR:", confMatrix4$byClass['Specificity'], "\n")
+
+roc <- roc(bact_test$BloodCulture, phat_test)
+
+auc_value <- auc(roc)
+print(paste("AUC:", auc_value))
+
+```
+
+```{r PCA_RF, include=FALSE, echo=FALSE}
+
+# Random forest with PCA
+
+bact_train_pca_15 <- bact_train_pca[, 1:15]
+bact_test_pca_15 <- bact_test_pca[, 1:15]
+
+bact_train_pca_15_df <- data.frame(bact_train_pca_15, BloodCulture = bact_train$BloodCulture)
+bact_test_pca_15_df <- data.frame(bact_test_pca_15, BloodCulture = bact_test$BloodCulture)
+
+bact_train_pca_15_df$BloodCulture <- as.factor(bact_train_pca_15_df$BloodCulture)
+
+bact_train_balanced <- smote(BloodCulture ~ ., bact_train_pca_15_df, perc.over = 300, k = 10)
+
+bact_rf = randomForest(BloodCulture ~ ., data = bact_train_balanced, ntree = 500, importance = TRUE, weights = ifelse(bact_train_balanced$BloodCulture == 1, 10, 1))
+
+predictions_factor <- factor(ifelse(predictions > 0.5, "1", "0"), levels = c("0", "1"))
+
+bact_test_pca_15_df$BloodCulture <- factor(bact_test_pca_15_df$BloodCulture, levels = c("0", "1"))
+
+conf_matrix5 <- confusionMatrix(predictions_factor, bact_test_pca_15_df$BloodCulture)
+print(conf_matrix5)
+cat("Accuracy:", conf_matrix5$overall['Accuracy'], "\n")
+cat("TPR:", conf_matrix5$byClass['Specificity'], "\n")  
+
+roc_curve <- roc(response = bact_test_pca_15_df$BloodCulture, predictor = predictions)
+auc_value <- auc(roc_curve)
+ci <- ci.auc(roc_curve)
+
+print(paste("AUC:", auc_value))
+print(paste("AUC 95% CI:", ci[1], "-", ci[3]))
+
+plot(roc_curve, main="ROC Curve", col="#1c61b6", lwd=2)
+abline(a = 0, b = 1, lty = 2, col = "gray")
+text(0.8, 0.2, paste("AUC =", round(auc_value, 2)), border = "black", cex = 1.2, font = 2)
+
+roc_curve <- roc(response = bact_test_pca_15_df$BloodCulture, predictor = predictions)
+auc_value <- auc(roc_curve)
+ci <- ci.auc(roc_curve)
+
+print(paste("AUC:", auc_value))
+print(paste("AUC 95% CI:", ci[1], "-", ci[3]))
+
+plot(roc_curve, main="ROC Curve", col="#1c61b6", lwd=2)
+abline(a = 0, b = 1, lty = 2, col = "gray")
+text(0.8, 0.2, paste("AUC =", round(auc_value, 2)), border = "black", cex = 1.2, font = 2)
+```
+
+
+```{r PCA_Boosting, include=FALSE, echo=FALSE}
+
+ # Boosting with PCA
+
+bact_train_pca_15_df <- data.frame(bact_train_pca_15, BloodCulture = bact_train$BloodCulture)
+bact_test_pca_15_df <- data.frame(bact_test_pca_15, BloodCulture = bact_test$BloodCulture)
+
+bact_train_pca_15_df$BloodCulture <- as.factor(bact_train_pca_15_df$BloodCulture)
+bact_test_pca_15_df$BloodCulture <- as.factor(bact_test_pca_15_df$BloodCulture)
+
+bact_boost = gbm(BloodCulture ~ ., 
+                 data = bact_train_pca_15_df,
+                 distribution = 'multinomial',  
+                 interaction.depth = 10, 
+                 n.trees = 500, 
+                 shrinkage = .05,
+                 verbose = FALSE, weights = ifelse(bact_train_pca_15_df$BloodCulture == 1, 10, 1))  
+
+predictions <- predict(bact_boost, newdata = bact_test_pca_15_df, n.trees = 1000, type = "response")
+
+predicted_classes <- apply(predictions, 1, which.max)
+predicted_classes <- factor(predicted_classes, levels = 1:nlevels(bact_test_pca_15_df$BloodCulture), labels = levels(bact_test_pca_15_df$BloodCulture))
+
+confMatrix7 <- confusionMatrix(predicted_classes, bact_test_pca_15_df$BloodCulture)
+print(confMatrix7)
+cat("Accuracy:", confMatrix7$overall['Accuracy'], "\n")
+cat("TPR:", confMatrix7$byClass['Specificity'], "\n")  
+```
+
+
+\flushleft
+## Results
+
+\centering
+|Table 2: Comparison of all models|
+|--------------|----------|------|------|------|
+| Model        | Accuracy | TPR  | TNR  | AUC  |
+| Logistic     | 0.76     | 0.59 | 0.77 | 0.74 |
+| Lasso        | 0.75     | 0.56 | 0.77 | 0.72 |
+| Rforest      | 0.70     | 0.51 | 0.73 | 0.67 |
+| Boosting     | 0.89     | 0.21 | 0.96 | NA   |
+| PCA-Logistic | 0.74     | 0.56 | 0.76 | 0.72 |
+| PCA-Lasso    | 0.75     | 0.56 | 0.76 | 0.72 |
+| PCA-Rforest  | 0.76     | 0.34 | 0.81 | 0.63 |
+| PCA-Boosting | 0.89     | 0.11 | 0.97 | NA   |
+
+
+\flushleft
+After making our best effort to balance overall accuracy and sensitivity, our evaluation statistics are shown in Table 2. There are four main statistics we focus on: accuracy, true positive rate (TPR), true negative rate (TNR), and AUC value. The calculation for TPR is: TPR = True Positive/(True Positive + False Negative). The calculation for TNR is: TNR = True Negative/(True Negative + False Positive). Note that in R Caret package, TPR is noted in "Specificity" while TNR is noted in "Sensitivity", which is different from what we usually interpret. Besides accuracy, these two statistics are especially important because in disease detection, true positive and true negative are determinants of life-saving treatments. False positive and false negative not only waste time and resources, but also can let the patient miss the best treatment time. The AUC is the area under ROC curve, which is a visualization of the classification model performance using TPR and FPR (false positive rate). Closer to 1 the AUC is, better the model performs.
+
+\flushleft
+Among all 8 models which have been tested, the regular logistic regression model did the best in TPR, and shows a stable performance but no improvement with PCA. PCA-boosting did the worst in TPR, which only successfully identified 11% of the true positive blood culture results. However, Boosting had a better overall accuracy, which is mostly contributed by high TNR. The performance of Boosting under this specific setting indicates that it doesn't have a good ability identifying the minorities in a dataset, even though weighted classes are defined. 
+
+\flushleft
+Besides logistic regression, Lasso also had a stable and high performance in identifying the minority group when weighted classes are defined. They also return satisfying results for the majority group. In real life setting, although we need a good overall accuracy, sometimes they are contributed by TNR and will return biased results for positive groups. That is to say, if the TNR of a classifier is too high, while the TPR is low, the model would probably return most of the results as "negative" and still keep a good overall accuracy, because there are only 10% of positive results present. However, for life-saving purposes, such models cannot be applied because it would miss the people who need prompt treatment. Thus, it is important that logistic and Lasso can do a good job in identifying minorities, because it approaches the major purpose of developing such model.
+
+\flushleft
+Random forest had a mediocre performance among these models. Although the overall statistics are satisfying, it contributes the two lowest AUC values in this comparison. That is to say, although it has a relatively higher TPR, its combined performance is not high. The valuable information is that the random forest can be greatly improved in terms of learning minority group after resampling and class weights. However, the random forest lost some minority classification power under PCA. 
+
+## Conclusion
+
+\flushleft
+In conclusion, we received evident result which differentiates the performance on blood stream infection detection of 4 major classifiers: logistic regression, Lasso, Random Forest and Boosting. Under the setting of fatal disease detection, logistic regression performed the best, while Boosting had its strength but is too unbalanced. Random Forest can be greatly improved by resampling and class weight methods, and can have a relatively higher TPR after improvement. For this specific dataset containing 52 variables, PCA doesn't seem to be helpful in terms of assisting other models to learn better about the minority group. Since model performance may vary under different setting and datasets, we cannot conclude that the logistic regression and Lasso are just better classifiers. Provided with some insights about how different models may perform with imbalanced dataset, we can have a better knowledge and expectation regarding model selection. 
+
+# Reference
+
+\flushleft
+Julián-Jiménez A, González Del Castillo J, García-Lamberechts EJ, Huarte Sanz I, Navarro Bustos C, Rubio Díaz R, Guardiola Tey JM, Llopis-Roca F, Piñera Salmerón P, de Martín-Ortiz de Zarate M, Álvarez-Manzanares J, Gamazo-Del Rio JJ, Álvarez Alonso M, Mora Ordoñez B, Álvarez López O, Ortega Romero MDM, Sousa Reviriego MDM, Perales Pardo R, Villena García Del Real H, Marchena González MJ, Ferreras Amez JM, González Martínez F, Martín-Sánchez FJ, Beneyto Martín P, Candel González FJ, Díaz-Honrubia AJ; INFURG-SEMES investigators. A bacteraemia risk prediction model: development and validation in an emergency medicine population. Infection. 2022 Feb;50(1):203-221. doi: 10.1007/s15010-021-01686-7. Epub 2021 Sep 6. PMID: 34487306.
+
+\flushleft
+Lee KH, Dong JJ, Kim S, Kim D, Hyun JH, Chae MH, Lee BS, Song YG. Prediction of Bacteremia Based on 12-Year Medical Data Using a Machine Learning Approach: Effect of Medical Data by Extraction Time. Diagnostics (Basel). 2022 Jan 3;12(1):102. doi: 10.3390/diagnostics12010102. PMID: 35054269; PMCID: PMC8774637.
+
+\flushleft
+National Library of Medicine, https://www.ncbi.nlm.nih.gov/books/NBK441979/ 
+
+\flushleft
+Ratzinger F, Dedeyan M, Rammerstorfer M, Perkmann T, Burgmann H, Makristathis A, Dorffner G, Lötsch F, Blacky A, Ramharter M. A risk prediction model for screening bacteremic patients: a cross sectional study. PLoS One. 2014 Sep 3;9(9):e106765. doi: 10.1371/journal.pone.0106765. PMID: 25184209; PMCID: PMC4153716.
+
