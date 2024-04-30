@@ -302,7 +302,7 @@ We implement a boosting algorithm using the gbm function with a multinomial dist
 \flushleft
 Given that the data contains 51 numerical features, we would apply a principal component analysis (**PCA**) method called for dimension reduction. PCA, by extracting the main sources of variation, helps to uncover the hidden and most informative structures within the data. 
 
-```{r PCA, include=FALSE}
+```{r PCA}
 
  # PCA
 
@@ -487,7 +487,7 @@ cat("TPR:", confMatrix7$byClass['Specificity'], "\n")
 
 
 \flushleft
-## Results
+# Results
 
 \centering
 |Table 2: Comparison of all models|
@@ -515,7 +515,7 @@ Besides logistic regression, Lasso also had a stable and high performance in ide
 \flushleft
 Random forest had a mediocre performance among these models. Although the overall statistics are satisfying, it contributes the two lowest AUC values in this comparison. That is to say, although it has a relatively higher TPR, its combined performance is not high. The valuable information is that the random forest can be greatly improved in terms of learning minority group after resampling and class weights. However, the random forest lost some minority classification power under PCA. 
 
-## Conclusion
+# Conclusion
 
 \flushleft
 In conclusion, we received evident result which differentiates the performance on blood stream infection detection of 4 major classifiers: logistic regression, Lasso, Random Forest and Boosting. Under the setting of fatal disease detection, logistic regression performed the best, while Boosting had its strength but is too unbalanced. Random Forest can be greatly improved by resampling and class weight methods, and can have a relatively higher TPR after improvement. For this specific dataset containing 52 variables, PCA doesn't seem to be helpful in terms of assisting other models to learn better about the minority group. Since model performance may vary under different setting and datasets, we cannot conclude that the logistic regression and Lasso are just better classifiers. Provided with some insights about how different models may perform with imbalanced dataset, we can have a better knowledge and expectation regarding model selection. 
