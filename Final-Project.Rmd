@@ -423,6 +423,7 @@ bact_train_balanced <- smote(BloodCulture ~ ., bact_train_pca_15_df, perc.over =
 
 bact_rf = randomForest(BloodCulture ~ ., data = bact_train_balanced, ntree = 500, importance = TRUE, weights = ifelse(bact_train_balanced$BloodCulture == 1, 10, 1))
 
+predictions <- predict(bact_rf, newdata = bact_test_pca_15_df, type = "prob")[, 2]
 predictions_factor <- factor(ifelse(predictions > 0.5, "1", "0"), levels = c("0", "1"))
 
 bact_test_pca_15_df$BloodCulture <- factor(bact_test_pca_15_df$BloodCulture, levels = c("0", "1"))
