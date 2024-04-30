@@ -443,16 +443,6 @@ plot(roc_curve, main="ROC Curve", col="#1c61b6", lwd=2)
 abline(a = 0, b = 1, lty = 2, col = "gray")
 text(0.8, 0.2, paste("AUC =", round(auc_value, 2)), border = "black", cex = 1.2, font = 2)
 
-roc_curve <- roc(response = bact_test_pca_15_df$BloodCulture, predictor = predictions)
-auc_value <- auc(roc_curve)
-ci <- ci.auc(roc_curve)
-
-print(paste("AUC:", auc_value))
-print(paste("AUC 95% CI:", ci[1], "-", ci[3]))
-
-plot(roc_curve, main="ROC Curve", col="#1c61b6", lwd=2)
-abline(a = 0, b = 1, lty = 2, col = "gray")
-text(0.8, 0.2, paste("AUC =", round(auc_value, 2)), border = "black", cex = 1.2, font = 2)
 ```
 
 
